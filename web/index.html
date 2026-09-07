@@ -35,6 +35,7 @@
       const fitAddon = new FitAddon();
       xterm.loadAddon(fitAddon);
       xterm.open(document.getElementById("terminal"));
+      xterm.focus();
 
       const { master, slave } = openpty();
       xterm.loadAddon(master);
