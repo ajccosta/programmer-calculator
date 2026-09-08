@@ -232,7 +232,11 @@ static void process_prompt(operation** current_op, char* prompt) {
 
     // Try to find a known command and handle it
     if (!strcmp(prompt, "quit") || !strcmp(prompt, "q") || !strcmp(prompt, "exit"))
+#ifndef __EMSCRIPTEN__
         exit_pcalc(0);
+#else
+        (void)0; //noop
+#endif
 
     else if (!strcmp(prompt, "binary"))
         binary_enabled = !binary_enabled;
