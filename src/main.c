@@ -477,6 +477,7 @@ static void get_input(char* in) {
                 //CTRL-D
             case 4:
                 //CTRL-D
+                searched = 1;
 #ifndef __EMSCRIPTEN__
                 exit_pcalc(0);
 #endif
