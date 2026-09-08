@@ -43,6 +43,7 @@ static void exit_pcalc_success(int);
 #ifdef __EMSCRIPTEN__
 static void persist_history_line(char*);
 static void replay_persisted_history(operation**);
+static void ignore_signal(int);
 #endif
 
 
@@ -150,8 +151,20 @@ int main(int argc, char* argv[])
 
     init_gui();
 
+#ifdef __EMSCRIPTEN__
+    // In the browser, CTRL+C is often reflexively pressed by users (e.g. to
+    // stop something), and quitting the whole app on that would be jarring --
+    // just ignore it there instead of exiting.
+    //
+    // A real handler function is used instead of SIG_IGN: xterm-pty's JS glue
+    // (web/emscripten-pty.js) only resumes a blocked read/getchar() with EINTR
+    // when sigaction() reports an actual installed handler function; with
+    // SIG_IGN it never does, leaving input stuck after the first CTRL+C.
+    signal(SIGINT, ignore_signal);
+#else
     // Set handler for CTRL+C to clean exit
     signal(SIGINT, exit_pcalc_success);
+#endif
 
     /*
      * The numberstack is used to store numbers used in calculations
@@ -441,9 +454,9 @@ static void get_input(char* in) {
          *  127 is a key that indicates the brackspace key was pressed
          */
         switch(inp) {
-
-            case -1:
+            case (char)-1:
                 update_win_borders(numbers);
+
             case 25:
                 continue;
                 break;
@@ -460,9 +473,13 @@ static void get_input(char* in) {
                 searched = 1;
                 break;
 
+            case 3:
+                //CTRL-D
             case 4:
                 //CTRL-D
+#ifndef __EMSCRIPTEN__
                 exit_pcalc(0);
+#endif
                 break;
 
             case 12:
@@ -662,6 +679,14 @@ static void get_input(char* in) {
                 }
                 break;
 
+            default:
+                // Any other control character or otherwise unhandled/non-printable
+                // byte we don't have a binding for: just ignore it instead of
+                // letting it get appended to the input and printed as garbage
+                if (inp < 32 || inp > 126)
+                    searched = 1;
+                break;
+
         }
 
         // Prevent user to input more than MAX_IN
@@ -764,6 +789,10 @@ static void exit_pcalc_success(int d __attribute__((unused))) {
 }
 
 #ifdef __EMSCRIPTEN__
+
+static void ignore_signal(int d __attribute__((unused))) {
+    // Intentionally does nothing -- see the comment where this is installed
+}
 
 // Appends a submitted input line to the persisted history file and
 // asynchronously flushes it to IndexedDB, so it survives a browser tab
