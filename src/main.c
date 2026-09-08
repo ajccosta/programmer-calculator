@@ -473,6 +473,104 @@ static void get_input(char* in) {
                 return;
                 break;
 
+            case 18: {
+                //CTRL-R: bash-style reverse incremental history search.
+                //
+                // Typing narrows the search; CTRL-R again looks further back.
+                // Esc/Left/Right load the current match into the editable
+                // input line WITHOUT running it -- only Enter submits it,
+                // exactly like a normal typed line would.
+
+                char query[MAX_IN + 1] = "";
+                int qlen = 0;
+                int match_idx = searchHistory.size;
+                char* match = NULL;
+                int c;
+
+                for (;;) {
+
+                    // Look (backwards, from match_idx) for the most recent entry containing query
+                    match = NULL;
+                    if (qlen > 0) {
+                        for (int j = match_idx - 1; j >= 0; j--) {
+                            if (strstr(searchHistory.records[j], query) != NULL) {
+                                match = searchHistory.records[j];
+                                match_idx = j;
+                                break;
+                            }
+                        }
+                    }
+
+                    sweepline(inputwin, 1, 0);
+                    if (use_interface)
+                        mvwprintw_colors(inputwin, 1, 2, COLOR_PAIR_DEFAULT, "(reverse-search)`%s': %s", query, match ? match : "");
+                    else
+                        mvwprintw(inputwin, 1, 2, "(reverse-search)`%s': %s", query, match ? match : "");
+                    wrefresh(inputwin);
+
+                    c = getchar();
+
+                    if (c == 13 || c == '\n') {
+                        // Enter: submit the matched command immediately, just like a normal line
+                        if (match != NULL)
+                            strcpy(in, match);
+
+                        sweepline(inputwin, 1, 0);
+
+                        if (in[0] != '\0' && (searchHistory.size == 0 || strcmp(in, searchHistory.records[searchHistory.size - 1]))) {
+                            add_to_history(&searchHistory, in);
+#ifdef __EMSCRIPTEN__
+                            persist_history_line(in);
+#endif
+                        }
+                        return;
+                    }
+                    else if (c == 27) {
+                        // Esc, or an arrow key (which arrives as ESC '[' <letter>):
+                        // in every case, just load the match into the editable
+                        // line -- never run it. Consume the rest of the escape
+                        // sequence so it isn't misread as further input.
+                        int c2 = getchar();
+                        if (c2 == '[')
+                            getchar();
+
+                        if (match != NULL)
+                            strcpy(in, match);
+                        else
+                            in[0] = '\0';
+                        pos = len = strlen(in);
+                        break;
+                    }
+                    else if (c == 18) {
+                        // CTRL-R again: look further back for an older match
+                        if (match_idx > 0)
+                            match_idx--;
+                    }
+                    else if ((c == 127 || c == 8) && qlen > 0) {
+                        query[--qlen] = '\0';
+                        match_idx = searchHistory.size;
+                    }
+                    else if (c >= 32 && c < 127 && qlen < MAX_IN) {
+                        query[qlen++] = (char) c;
+                        query[qlen] = '\0';
+                        match_idx = searchHistory.size;
+                    }
+                }
+
+                sweepline(inputwin, 1, 0);
+                if (use_interface) {
+                    mvwprintw_colors(inputwin, 1, 2, COLOR_PAIR_INPUT, "Number or operator: ");
+                    mvwprintw_colors(inputwin, 1, 22, COLOR_PAIR_DEFAULT, "%s", in);
+                } else {
+                    mvwprintw(inputwin, 1, 2, "Number or operator: ");
+                    mvwprintw(inputwin, 1, 22, "%s", in);
+                }
+                wmove(inputwin, 1, 22 + pos);
+                wrefresh(inputwin);
+
+                continue;
+            }
+
             case 8:
                 //CTRL-Backspace
             case 23:
@@ -671,6 +769,11 @@ static void exit_pcalc_success(int d __attribute__((unused))) {
 // asynchronously flushes it to IndexedDB, so it survives a browser tab
 // being closed without ever running exit_pcalc.
 static void persist_history_line(char* in) {
+
+    // Don't persist quit commands -- replaying one on the next load would
+    // call exit_pcalc() immediately and the app would never start
+    if (!strcmp(in, "quit") || !strcmp(in, "q") || !strcmp(in, "exit"))
+        return;
 
     FILE* f = fopen(PERSISTENT_HISTORY_PATH, "a");
     if (f == NULL)
