@@ -14,6 +14,14 @@
 #include "operators.h"
 #include "parser.h"
 
+#ifdef __EMSCRIPTEN__
+#include <emscripten.h>
+
+// Persisted (IDBFS-backed) file where every submitted input line is appended,
+// so that closing and reopening the browser tab restores the same session.
+#define PERSISTENT_HISTORY_PATH "/persist/history"
+#endif
+
 
 
 
@@ -31,6 +39,11 @@ static void process_prompt(operation**, char*);
 static void get_input(char*);
 static void apply_operations(numberstack*, operation**);
 static void exit_pcalc_success(int);
+
+#ifdef __EMSCRIPTEN__
+static void persist_history_line(char*);
+static void replay_persisted_history(operation**);
+#endif
 
 
 
@@ -166,11 +179,17 @@ int main(int argc, char* argv[])
     // Start numberstack and history with 0
     push_numberstack(numbers, 0);
     add_to_history(&history, "0");
-    // Display number on top of the stack (0)
-    draw(numbers, current_op);
 
     // No longer add empty string to history bottom, because the scroll was reversed
     /* add_to_history(&searchHistory, ""); */
+
+#ifdef __EMSCRIPTEN__
+    // Restore the previous browser session's inputs, if any
+    replay_persisted_history(&current_op);
+#endif
+
+    // Display number on top of the stack (0)
+    draw(numbers, current_op);
 
     //Main Loop
     for (;;) {
@@ -609,6 +628,9 @@ static void get_input(char* in) {
 
     if (in[0] != '\0' && (searchHistory.size == 0 || strcmp(in, searchHistory.records[searchHistory.size - 1]))) {
         add_to_history(&searchHistory, in);
+#ifdef __EMSCRIPTEN__
+        persist_history_line(in);
+#endif
     }
 
 }
@@ -630,6 +652,11 @@ void exit_pcalc(int code) {
 
     }
 
+#ifdef __EMSCRIPTEN__
+    // Best-effort flush of the persisted history to IndexedDB before exiting
+    emscripten_run_script("FS.syncfs(false, function(err) {});");
+#endif
+
     exit(code);
 }
 
@@ -637,3 +664,48 @@ static void exit_pcalc_success(int d __attribute__((unused))) {
 
     exit_pcalc(0);
 }
+
+#ifdef __EMSCRIPTEN__
+
+// Appends a submitted input line to the persisted history file and
+// asynchronously flushes it to IndexedDB, so it survives a browser tab
+// being closed without ever running exit_pcalc.
+static void persist_history_line(char* in) {
+
+    FILE* f = fopen(PERSISTENT_HISTORY_PATH, "a");
+    if (f == NULL)
+        return;
+
+    fprintf(f, "%s\n", in);
+    fclose(f);
+
+    emscripten_run_script("FS.syncfs(false, function(err) {});");
+}
+
+// Reads back lines persisted by a previous session (if any) and replays
+// them through the normal input pipeline, reconstructing the numberstack,
+// history and searchHistory exactly as if the user had typed them again.
+static void replay_persisted_history(operation** current_op) {
+
+    FILE* f = fopen(PERSISTENT_HISTORY_PATH, "r");
+    if (f == NULL)
+        return;
+
+    char line[MAX_IN + 1];
+    while (fgets(line, sizeof(line), f) != NULL) {
+
+        line[strcspn(line, "\r\n")] = '\0';
+
+        if (line[0] == '\0')
+            continue;
+
+        if (searchHistory.size == 0 || strcmp(line, searchHistory.records[searchHistory.size - 1]))
+            add_to_history(&searchHistory, line);
+
+        process_prompt(current_op, line);
+    }
+
+    fclose(f);
+}
+
+#endif

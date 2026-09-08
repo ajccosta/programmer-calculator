@@ -12,14 +12,11 @@
         margin: 0;
         height: 100%;
         background: #000;
-        display: flex;
-        align-items: center;
-        justify-content: center;
         font-family: monospace;
       }
       #terminal {
-        width: 90vw;
-        max-width: 900px;
+        width: 100vw;
+        height: 100vh;
       }
     </style>
   </head>
@@ -42,7 +39,28 @@
       fitAddon.fit();
       window.addEventListener("resize", () => fitAddon.fit());
 
-      await initEmscripten({ pty: slave });
+      const Module = { pty: slave };
+      // Mount a persistent (IndexedDB-backed) directory before main() runs,
+      // and load whatever history was saved by a previous session, so
+      // pcalc's history survives closing and reopening the browser.
+      Module.preRun = [
+        () => {
+          try {
+            Module.FS.mkdir("/persist");
+            Module.FS.mount(Module.FS.filesystems.IDBFS, {}, "/persist");
+          } catch (err) {
+            console.error("pcalc: could not mount persistent history storage", err);
+            return;
+          }
+          Module.addRunDependency("idbfs-load");
+          Module.FS.syncfs(true, (err) => {
+            if (err) console.error("pcalc: failed to load saved history", err);
+            Module.removeRunDependency("idbfs-load");
+          });
+        },
+      ];
+
+      await initEmscripten(Module);
     </script>
   </body>
 </html>

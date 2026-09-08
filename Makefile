@@ -99,7 +99,8 @@ web: $(EMSDK_READY) $(NCURSES_INSTALL)/lib/libncurses.a $(WEBDIR)/emscripten-pty
 		$(wildcard $(SRC)/*.c) \
 		-L $(NCURSES_INSTALL)/lib -lncurses \
 		--js-library=$(WEBDIR)/emscripten-pty.js \
-		-s ASYNCIFY -s FORCE_FILESYSTEM \
+		-lidbfs.js \
+		-s ASYNCIFY -s FORCE_FILESYSTEM -s EXPORTED_RUNTIME_METHODS=FS \
 		--embed-file $(NCURSES_INSTALL)/share/terminfo@/usr/share/terminfo \
 		-o $(WEBDIR)/pcalc.mjs
 	@echo "Built $(WEBDIR)/pcalc.mjs + $(WEBDIR)/pcalc.wasm -- serve $(WEBDIR)/ over HTTP and open index.html"
